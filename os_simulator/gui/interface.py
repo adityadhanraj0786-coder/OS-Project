@@ -8,10 +8,26 @@ from scheduler.round_robin import round_robin_scheduling
 from visualization.gantt_chart import draw_gantt_chart
 from resource_manager.manager import ResourceManager
 from deadlock.detection import detect_deadlock
-from deadlock.recovery import recover_deadlock
-from visualization.graph_visual import draw_graph
+
 
 process_entries = []
+resource_requests = []
+
+def add_resource_request(entry):
+    text = entry.get().strip()
+
+    if "," not in text:
+        messagebox.showerror("Error", "Format must be P1,R1")
+        return
+
+    p, r = text.split(",")
+
+    resource_requests.append((p.strip(), r.strip()))
+
+    entry.delete(0, tk.END)
+
+    messagebox.showinfo("Added", f"Added request: {p} → {r}")
+
 
 def add_process_fields():
     frame = tk.Frame(left_frame)
@@ -34,12 +50,25 @@ def add_process_fields():
 def create_gantt_figure(gantt):
     fig, ax = plt.subplots()
 
+    y = 0
     for task in gantt:
-        ax.barh(0, task["end"] - task["start"], left=task["start"])
-        ax.text(task["start"], 0, task["process"])
+        start = task["start"]
+        duration = task["end"] - task["start"]
+        process = task["process"]
 
-    ax.set_title("Gantt Chart (CPU Scheduling)")
+        ax.barh(y, duration, left=start)
+
+        # Center label inside bar
+        ax.text(start + duration/2, y, process,
+                ha='center', va='center', color='white', fontweight='bold')
+
+    # Time markers
+    times = [task["start"] for task in gantt] + [gantt[-1]["end"]]
+    ax.set_xticks(times)
+
+    ax.set_title("Gantt Chart (CPU Scheduling Timeline)")
     ax.set_xlabel("Time")
+    ax.set_yticks([])
 
     return fig
 
@@ -102,6 +131,52 @@ def reset_all():
         pid.delete(0, tk.END)
         arr.delete(0, tk.END)
         burst.delete(0, tk.END)
+    resource_requests.clear()
+
+def compare_algorithms(processes):
+    results = {}
+
+    # FCFS
+    fcfs_result = fcfs_scheduling(processes)
+    results["FCFS"] = calculate_avg_metrics(processes, fcfs_result)
+
+    # SJF
+    sjf_result = sjf_scheduling(processes)
+    results["SJF"] = calculate_avg_metrics(processes, sjf_result)
+
+    # Round Robin (use default quantum = 2)
+    rr_result = round_robin_scheduling(processes, 2)
+    results["Round Robin"] = calculate_avg_metrics(processes, rr_result)
+
+    return results
+
+def calculate_avg_metrics(processes, result):
+    completion_times = {}
+
+    for task in result:
+        completion_times[task["process"]] = task["end"]
+
+    total_tat = 0
+    total_wt = 0
+
+    for p in processes:
+        pid = p["id"]
+        arrival = p["arrival"]
+        burst = p["burst"]
+
+        ct = completion_times.get(pid, 0)
+        tat = ct - arrival
+        wt = tat - burst
+
+        total_tat += tat
+        total_wt += wt
+
+    n = len(processes)
+
+    return {
+        "avg_turnaround": total_tat / n,
+        "avg_waiting": total_wt / n
+    }
 
 def run_simulation():
     global graph_steps, current_step
@@ -151,37 +226,153 @@ def run_simulation():
     for r in result:
         output_text.insert(tk.END, f"{r}\n")
 
-    
+    # ---------------- EXECUTION FLOW ----------------
+    output_text.insert(tk.END, "\n=== Execution Flow ===\n")
 
-    # Step 1: Gantt
+    for task in result:
+        process = task["process"]
+        start = task["start"]
+        end = task["end"]
+
+        output_text.insert(
+            tk.END,
+            f"{process} is allocated CPU at {start} and finishes at {end}\n"
+        )
+
+        # ---------------- SCHEDULING METRICS ----------------
+    output_text.insert(tk.END, "\n=== Scheduling Performance Analysis ===\n")
+
+    completion_times = {}
+    turnaround_times = {}
+    waiting_times = {}
+
+    # Step 1: get completion time of each process
+    for task in result:
+        completion_times[task["process"]] = task["end"]
+
+    # Step 2: calculate metrics
+    # Get first execution time of each process
+    first_start = {}
+
+    for task in result:
+        if task["process"] not in first_start:
+            first_start[task["process"]] = task["start"]
+    for p in processes:
+        process_id = p["id"]
+        arrival_time = p["arrival"]
+        burst_time = p["burst"]
+
+        completion_time = completion_times.get(process_id, 0)
+        turnaround_time = completion_time - arrival_time
+        waiting_time = turnaround_time - burst_time
+        turnaround_times[process_id] = turnaround_time
+        waiting_times[process_id] = waiting_time
+
+        response_time = first_start.get(process_id, 0) - arrival_time
+
+        output_text.insert(
+            tk.END,
+            f"{process_id} → Completion Time = {completion_time}, "
+            f"Turnaround Time = {turnaround_time}, "
+            f"Waiting Time = {waiting_time}\n"
+            f"Response Time = {response_time}\n"
+        )
+
+    # ---------------- THROUGHPUT ----------------
+    total_time = result[-1]["end"] if result else 0
+
+    throughput = len(processes) / total_time if total_time > 0 else 0
+
+    output_text.insert(
+        tk.END,
+        f"\nThroughput = {throughput:.2f} processes per unit time\n"
+    )
+
+    # Step 3: calculate averages
+    average_turnaround = sum(turnaround_times.values()) / len(turnaround_times)
+    average_waiting = sum(waiting_times.values()) / len(waiting_times)
+
+    output_text.insert(
+        tk.END,
+        f"\nAverage Turnaround Time = {average_turnaround:.2f}\n"
+    )
+    output_text.insert(
+        tk.END,
+        f"Average Waiting Time = {average_waiting:.2f}\n"
+)
+    # ---------------- ALGORITHM COMPARISON ----------------
+    comparison = compare_algorithms(processes)
+
+    output_text.insert(tk.END, "\n=== Algorithm Comparison ===\n")
+
+    for algo, values in comparison.items():
+        output_text.insert(
+            tk.END,
+            f"{algo} → Average Turnaround Time = {values['avg_turnaround']:.2f}, "
+            f"Average Waiting Time = {values['avg_waiting']:.2f}\n"
+        )
+
+    # Gantt
     graph_steps.append(create_gantt_figure(result))
 
 
     # ---------------- DEADLOCK ----------------
+    
     output_text.insert(tk.END, "\n=== Deadlock Analysis ===\n")
-    resources = {"R1": 1, "R2": 1}
-    rm = ResourceManager(resources)
+   
+    rm = ResourceManager({})
 
-     # Create dynamic resources
-    for i in range(len(processes)):
-     rm.available[f"R{i+1}"] = 1
+    # ---------------- DYNAMIC RESOURCE CREATION ----------------
+    all_resources = set()
 
-    # Step 1: allocate one resource to each process
-    for i in range(len(processes)):
-     p = processes[i]["id"]
-     r = f"R{i+1}"
-    rm.request_resource(p, r)
+    for p, r in resource_requests:
+        all_resources.add(r)
 
-   # Step 2: create circular wait
-    for i in range(len(processes)):
-        p = processes[i]["id"]
-        next_r = f"R{(i+1) % len(processes) + 1}"
-        rm.request_resource(p, next_r)
+    for r in all_resources:
+        rm.available[r] = 1
+
+    
+
+    
+
+    # Apply user-defined resource requests (if added later)
+    for p, r in resource_requests:
+
+    # ✅ VALIDATION (ADD HERE)
+        if r not in rm.available:
+            output_text.insert(tk.END, f"\n⚠️ Resource {r} not defined!\n")
+            continue
+        rm.request_resource(p, r)
+
+    # ---------------- RESOURCE UTILIZATION ----------------
+    total_resources = len(rm.available)
+    used_resources = sum(len(v) for v in rm.allocation.values())
+    free_resources = sum(rm.available.values())
+
+    output_text.insert(
+        tk.END,
+        f"\nResource Utilization:\n"
+        f"Total Resources = {total_resources}\n"
+        f"Used Resources = {used_resources}\n"
+        f"Free Resources = {free_resources}\n"
+    )
 
     is_deadlock = detect_deadlock(rm)
 
     if is_deadlock:
         output_text.insert(tk.END, "\n🔴 DEADLOCK DETECTED\n")
+
+        deadlocked_processes = list(rm.request.keys())
+        output_text.insert(
+            tk.END,
+            f"\nNumber of processes involved in deadlock: {len(deadlocked_processes)}\n"
+        )
+        
+
+        output_text.insert(
+        tk.END,
+        f"\nProcesses involved in deadlock: {', '.join(deadlocked_processes)}\n"
+    )
     
         # BEFORE STATE
         output_text.insert(tk.END, "\n--- BEFORE RECOVERY ---\n")
@@ -192,7 +383,7 @@ def run_simulation():
         output_text.insert(tk.END, "\n📊 Graph BEFORE Recovery\n")
         output_text.insert(tk.END,
         "\n In this graph:\n"
-        "• Processes (P1, P2) and Resources (R1, R2) are shown as nodes\n"
+        "• Processes and Resources are shown as nodes\n"
         "• Arrow P → R means process is requesting resource\n"
         "• Arrow R → P means resource is allocated to process\n"
         "• A cycle in the graph indicates DEADLOCK\n"
@@ -201,10 +392,43 @@ def run_simulation():
 
         # RECOVERY
         output_text.insert(tk.END, "\n🔧 Applying Recovery...\n")
-        recover_deadlock(rm)
+        # Select process to terminate (simple strategy: first one)
+        max_resources = -1
+        terminated_process = None
+
+        for p in deadlocked_processes:
+            count = len(rm.allocation.get(p, []))
+            if count > max_resources:
+                max_resources = count
+                terminated_process = p
+
+        output_text.insert(
+            tk.END,
+            f"\nTerminating process to resolve deadlock: {terminated_process}\n"
+        )
+
+# ---------------- CUSTOM RECOVERY ----------------
+        released = rm.allocation.pop(terminated_process, [])
+
+        for r in released:
+            rm.available[r] += 1
+
+        rm.request.pop(terminated_process, None)
+
+        for p in rm.request:
+            rm.request[p] = [r for r in rm.request[p] if r in rm.available]
 
         # AFTER STATE
         output_text.insert(tk.END, "\n--- AFTER RECOVERY ---\n")
+
+      
+        # ✅ Then print it
+        output_text.insert(
+            tk.END,
+            f"Resources released: {', '.join(released) if released else 'None'}\n"
+        )
+
+        # continue normal output
         output_text.insert(tk.END, f"Allocation: {rm.allocation}\n")
         output_text.insert(tk.END, f"Request: {rm.request}\n")
         output_text.insert(tk.END, f"Available: {rm.available}\n")
@@ -227,6 +451,7 @@ def run_simulation():
 
     else:
         output_text.insert(tk.END, "\n✅ No deadlock.\n")
+   
     show_current_graph()
 
 # Create window
@@ -256,6 +481,21 @@ quantum_entry = tk.Entry(left_frame)
 quantum_entry.pack(pady=5)
 
 tk.Button(left_frame, text="Add Process", command=add_process_fields).pack(pady=10)
+
+# ---------------- RESOURCE INPUT UI ----------------
+tk.Label(left_frame, text="Resource Requests (P,R)").pack()
+
+resource_entry = tk.Entry(left_frame)
+resource_entry.pack(pady=5)
+
+tk.Label(left_frame, text="Example: P1,R1").pack()
+
+tk.Button(
+    left_frame,
+    text="Add Resource Request",
+    command=lambda: add_resource_request(resource_entry)
+).pack(pady=5)
+
 tk.Button(left_frame, text="Run Simulation", command=run_simulation, bg="#4CAF50", fg="white").pack(pady=10)
 tk.Button(left_frame,
           text="Reset",

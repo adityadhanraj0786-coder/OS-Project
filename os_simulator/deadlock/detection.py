@@ -1,36 +1,65 @@
-def detect_deadlock(resource_manager):
+def build_resource_allocation_graph(resource_manager):
     graph = {}
 
-    # Build graph from allocation
-    for process, resources in resource_manager.allocation.items():
-        for r in resources:
-            graph.setdefault(r, []).append(process)
+    for process_id, resources in resource_manager.allocation.items():
+        graph.setdefault(process_id, [])
+        for resource in resources:
+            graph.setdefault(resource, []).append(process_id)
 
-    # Build graph from requests
-    for process, resources in resource_manager.request.items():
-        for r in resources:
-            graph.setdefault(process, []).append(r)
+    for process_id, resources in resource_manager.request.items():
+        graph.setdefault(process_id, [])
+        for resource in resources:
+            graph.setdefault(process_id, []).append(resource)
+            graph.setdefault(resource, [])
 
+    return graph
+
+
+def _find_cycle(graph):
     visited = set()
-    rec_stack = set()
+    recursion_stack = []
+    stack_lookup = set()
 
-    def dfs(node):
+    def depth_first_search(node):
         visited.add(node)
-        rec_stack.add(node)
+        recursion_stack.append(node)
+        stack_lookup.add(node)
 
         for neighbor in graph.get(node, []):
             if neighbor not in visited:
-                if dfs(neighbor):
-                    return True
-            elif neighbor in rec_stack:
-                return True
+                cycle = depth_first_search(neighbor)
+                if cycle:
+                    return cycle
+            elif neighbor in stack_lookup:
+                cycle_start = recursion_stack.index(neighbor)
+                return recursion_stack[cycle_start:] + [neighbor]
 
-        rec_stack.remove(node)
-        return False
+        recursion_stack.pop()
+        stack_lookup.remove(node)
+        return None
 
     for node in graph:
         if node not in visited:
-            if dfs(node):
-                return True
+            cycle = depth_first_search(node)
+            if cycle:
+                return cycle
 
-    return False
+    return []
+
+
+def analyze_deadlock(resource_manager):
+    graph = build_resource_allocation_graph(resource_manager)
+    cycle = _find_cycle(graph)
+    process_nodes = set(resource_manager.allocation.keys()) | set(resource_manager.request.keys())
+    involved_processes = sorted({node for node in cycle if node in process_nodes})
+
+    return {
+        "has_deadlock": bool(cycle),
+        "graph": graph,
+        "cycle": cycle,
+        "processes": involved_processes,
+    }
+
+
+def detect_deadlock(resource_manager):
+    return analyze_deadlock(resource_manager)["has_deadlock"]

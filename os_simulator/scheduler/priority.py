@@ -1,15 +1,17 @@
-def sjf_scheduling(processes):
-    """Return a non-preemptive SJF execution timeline with idle periods."""
+def priority_scheduling(processes):
+    """Return a non-preemptive priority schedule with arrival-aware ready selection."""
     pending = sorted(
         (
             {
                 "id": process["id"],
                 "arrival": int(process["arrival"]),
                 "burst": int(process["burst"]),
+                "priority": int(process["priority"]),
+                "_order": index,
             }
-            for process in processes
+            for index, process in enumerate(processes)
         ),
-        key=lambda process: (process["arrival"], process["burst"], process["id"]),
+        key=lambda process: (process["arrival"], process["_order"]),
     )
 
     time = 0
@@ -27,7 +29,7 @@ def sjf_scheduling(processes):
             time = next_arrival
             continue
 
-        ready_queue.sort(key=lambda process: (process["burst"], process["arrival"], process["id"]))
+        ready_queue.sort(key=lambda process: (process["priority"], process["arrival"], process["_order"]))
         current = ready_queue.pop(0)
 
         start = time

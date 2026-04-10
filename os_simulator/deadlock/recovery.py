@@ -1,20 +1,37 @@
 def recover_deadlock(resource_manager):
-    print("\n🔧 Attempting Deadlock Recovery...")
+    candidates = sorted(set(resource_manager.allocation.keys()) | set(resource_manager.request.keys()))
+    if not candidates:
+        return {
+            "victim": None,
+            "released_resources": [],
+            "dropped_requests": [],
+            "reallocated": [],
+        }
 
-    # Pick a process to terminate (simple strategy: first one)
-    if resource_manager.allocation:
-        victim = list(resource_manager.allocation.keys())[0]
+    victim = max(
+        candidates,
+        key=lambda process_id: (
+            len(resource_manager.allocation.get(process_id, [])),
+            len(resource_manager.request.get(process_id, [])),
+            process_id,
+        ),
+    )
 
-        print(f"❌ Terminating process: {victim}")
+    released_resources = resource_manager.release_all(victim)
+    dropped_requests = list(resource_manager.request.pop(victim, []))
+    reallocated = resource_manager.retry_waiting_processes()
 
-        # Release all resources of that process
-        for resource in resource_manager.allocation[victim]:
-            resource_manager.available[resource] += 1
+    resource_manager.event_log.append(
+        {
+            "process": victim,
+            "resource": ",".join(released_resources) if released_resources else "None",
+            "action": "terminated_for_recovery",
+        }
+    )
 
-        # Remove process from allocation and request
-        resource_manager.allocation.pop(victim, None)
-        resource_manager.request.pop(victim, None)
-
-        print(f"✅ Resources released from {victim}")
-    else:
-        print("No process to terminate.")
+    return {
+        "victim": victim,
+        "released_resources": released_resources,
+        "dropped_requests": dropped_requests,
+        "reallocated": reallocated,
+    }
